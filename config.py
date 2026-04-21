@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "*"
 
+    # OpenAPI
+    openapi_server_url: str = ""
+    openapi_server_description: str = "Current server"
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent / ".env",
         env_file_encoding="utf-8",
@@ -29,6 +33,21 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]
+
+    @property
+    def openapi_servers(self) -> List[dict]:
+        if self.openapi_server_url.strip():
+            return [{
+                "url": self.openapi_server_url.strip(),
+                "description": self.openapi_server_description,
+            }]
+
+        host = "localhost" if self.app_host in {"0.0.0.0", "127.0.0.1"} else self.app_host
+        scheme = "https" if self.app_env.lower() == "production" else "http"
+        return [{
+            "url": f"{scheme}://{host}:{self.app_port}",
+            "description": self.openapi_server_description,
+        }]
 
 
 settings = Settings()

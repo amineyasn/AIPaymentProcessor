@@ -9,6 +9,7 @@ OpenAPI-compliant — ready for Microsoft Copilot Studio custom connector import
 Endpoints:
   GET  /customers              — Search / list customers
   GET  /customers/{id}         — Get customer by ID
+    PATCH /customers/{id}         — Update customer billing information
   GET  /invoices               — Search / list invoices
   GET  /invoices/{ref}         — Get invoice by reference number
   POST /payments               — Create a payment
@@ -19,7 +20,6 @@ Endpoints:
   POST /agent                  — AI: conversational payment agent
 """
 
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -65,7 +65,7 @@ app = FastAPI(
     openapi_tags=[
         {
             "name": "Customers",
-            "description": "Look up Acumatica customer records."
+            "description": "Look up and update Acumatica customer billing records."
         },
         {
             "name": "Invoices",
@@ -153,10 +153,14 @@ def custom_openapi():
         tags=app.openapi_tags,
     )
 
+    # Ensure OpenAPI always includes at least one server entry.
+    schema["servers"] = settings.openapi_servers
+
     # Copilot Studio requires unique operationId for every path+method
     op_id_map = {
         ("get",  "/customers"):                   "listCustomers",
         ("get",  "/customers/{customer_id}"):     "getCustomer",
+        ("patch", "/customers/{customer_id}"):    "updateCustomerBillingInfo",
         ("get",  "/invoices"):                    "listInvoices",
         ("get",  "/invoices/{reference_nbr}"):    "getInvoice",
         ("post", "/payments"):                    "createPayment",

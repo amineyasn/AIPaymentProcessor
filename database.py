@@ -22,37 +22,80 @@ CUSTOMERS: Dict[str, Customer] = {
     "OXBLUE001": Customer(
         customer_id="OXBLUE001",
         customer_name="OxBlue Corporation",
-        email="ar@oxblue.com"
+        email="ar@oxblue.com",
+        billing_contact_name="OxBlue Accounts Receivable",
+        billing_phone="555-1001",
+        billing_address_line1="123 Peachtree St NE",
+        billing_address_line2="Suite 500",
+        billing_city="Atlanta",
+        billing_state="GA",
+        billing_postal_code="30303"
     ),
     "LECHASE001": Customer(
         customer_id="LECHASE001",
         customer_name="LeChase Construction Services, LLC",
-        email="ap@lechase.com"
+        email="ap@lechase.com",
+        billing_contact_name="LeChase Payables",
+        billing_phone="555-1002",
+        billing_address_line1="205 St Paul St",
+        billing_city="Rochester",
+        billing_state="NY",
+        billing_postal_code="14604"
     ),
     "CWLTH001": Customer(
         customer_id="CWLTH001",
         customer_name="Commonwealth Fusion Systems",
-        email="accounts@cfs.energy"
+        email="accounts@cfs.energy",
+        billing_contact_name="CFS Accounts Payable",
+        billing_phone="555-1003",
+        billing_address_line1="117 Hospital Rd",
+        billing_city="Devens",
+        billing_state="MA",
+        billing_postal_code="01434"
     ),
     "DRISCOLL001": Customer(
         customer_id="DRISCOLL001",
         customer_name="L.F. Driscoll Company",
-        email="ap@lfdriscoll.com"
+        email="ap@lfdriscoll.com",
+        billing_contact_name="Driscoll Billing",
+        billing_phone="555-1004",
+        billing_address_line1="1000 N West St",
+        billing_city="Wilmington",
+        billing_state="DE",
+        billing_postal_code="19801"
     ),
     "DPR001": Customer(
         customer_id="DPR001",
         customer_name="DPR Construction",
-        email="payables@dprinc.com"
+        email="payables@dprinc.com",
+        billing_contact_name="DPR Payables",
+        billing_phone="555-1005",
+        billing_address_line1="1450 Veterans Blvd",
+        billing_city="Redwood City",
+        billing_state="CA",
+        billing_postal_code="94063"
     ),
     "SLAYDEN001": Customer(
         customer_id="SLAYDEN001",
         customer_name="Slayden Constructors",
-        email="ap@slayden.com"
+        email="ap@slayden.com",
+        billing_contact_name="Slayden Billing",
+        billing_phone="555-1006",
+        billing_address_line1="1519 Nashville Pike",
+        billing_city="Gallatin",
+        billing_state="TN",
+        billing_postal_code="37066"
     ),
     "KNUTSON001": Customer(
         customer_id="KNUTSON001",
         customer_name="Knutson Construction",
-        email="accounting@knutsonconstruction.com"
+        email="accounting@knutsonconstruction.com",
+        billing_contact_name="Knutson Accounting",
+        billing_phone="555-1007",
+        billing_address_line1="7515 Wayzata Blvd",
+        billing_city="Minneapolis",
+        billing_state="MN",
+        billing_postal_code="55426"
     ),
 }
 
@@ -163,6 +206,16 @@ def _next_ref() -> str:
 
 def get_customer(customer_id: str) -> Optional[Customer]:
     return CUSTOMERS.get(customer_id)
+
+
+def update_customer_billing_info(customer_id: str, updates: dict) -> Optional[Customer]:
+    customer = CUSTOMERS.get(customer_id)
+    if not customer:
+        return None
+
+    updated_customer = customer.model_copy(update=updates)
+    CUSTOMERS[customer_id] = updated_customer
+    return updated_customer
 
 
 def search_customers(name_fragment: str) -> List[Customer]:

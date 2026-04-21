@@ -45,14 +45,50 @@ class DocumentType(str, Enum):
 # ─────────────────────────────────────────────
 
 class Customer(BaseModel):
-    customer_id:   str  = Field(..., description="Acumatica Customer ID (e.g. OXBLUE001)", example="OXBLUE001")
-    customer_name: str  = Field(..., description="Full legal name of the customer", example="OxBlue Corporation")
-    email:         str  = Field(..., description="Primary billing email", example="ar@oxblue.com")
+    customer_id:           str           = Field(..., description="Acumatica Customer ID (e.g. OXBLUE001)", example="OXBLUE001")
+    customer_name:         str           = Field(..., description="Full legal name of the customer", example="OxBlue Corporation")
+    email:                 str           = Field(..., description="Primary billing email", example="ar@oxblue.com")
+    billing_contact_name:  Optional[str] = Field(None, description="Primary billing contact name", example="Jamie Lee")
+    billing_phone:         Optional[str] = Field(None, description="Primary billing contact phone number", example="555-0100")
+    billing_address_line1: Optional[str] = Field(None, description="Billing street address line 1", example="123 Main St")
+    billing_address_line2: Optional[str] = Field(None, description="Billing street address line 2", example="Suite 400")
+    billing_city:          Optional[str] = Field(None, description="Billing city", example="Atlanta")
+    billing_state:         Optional[str] = Field(None, description="Billing state or province", example="GA")
+    billing_postal_code:   Optional[str] = Field(None, description="Billing postal code", example="30303")
 
     model_config = {"json_schema_extra": {"example": {
         "customer_id": "OXBLUE001",
         "customer_name": "OxBlue Corporation",
-        "email": "ar@oxblue.com"
+        "email": "ar@oxblue.com",
+        "billing_contact_name": "Jamie Lee",
+        "billing_phone": "555-0100",
+        "billing_address_line1": "123 Main St",
+        "billing_address_line2": "Suite 400",
+        "billing_city": "Atlanta",
+        "billing_state": "GA",
+        "billing_postal_code": "30303"
+    }}}
+
+
+class UpdateCustomerBillingRequest(BaseModel):
+    email:                 Optional[str] = Field(None, description="Updated primary billing email", example="billing@oxblue.com")
+    billing_contact_name:  Optional[str] = Field(None, description="Updated primary billing contact name", example="Jamie Lee")
+    billing_phone:         Optional[str] = Field(None, description="Updated primary billing contact phone number", example="555-0100")
+    billing_address_line1: Optional[str] = Field(None, description="Updated billing street address line 1", example="123 Main St")
+    billing_address_line2: Optional[str] = Field(None, description="Updated billing street address line 2", example="Suite 400")
+    billing_city:          Optional[str] = Field(None, description="Updated billing city", example="Atlanta")
+    billing_state:         Optional[str] = Field(None, description="Updated billing state or province", example="GA")
+    billing_postal_code:   Optional[str] = Field(None, description="Updated billing postal code", example="30303")
+
+    model_config = {"json_schema_extra": {"example": {
+        "email": "billing@oxblue.com",
+        "billing_contact_name": "Jamie Lee",
+        "billing_phone": "555-0100",
+        "billing_address_line1": "123 Main St",
+        "billing_address_line2": "Suite 400",
+        "billing_city": "Atlanta",
+        "billing_state": "GA",
+        "billing_postal_code": "30303"
     }}}
 
 

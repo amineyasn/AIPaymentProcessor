@@ -1,0 +1,11 @@
+az webapp config appsettings set --name $appName --resource-group $resourceGroup --settings `
+    SCM_DO_BUILD_DURING_DEPLOYMENT=true `
+    PYTHON_VERSION=3.11
+
+
+
+
+
+
+
+curl https://aipaymentprocessor-app-fastapi.azurewebsites.net/openapi.json -o acumatica_api.json
