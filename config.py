@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     openapi_server_url: str = ""
     openapi_server_description: str = "Current server"
 
+    # Observability (Azure Application Insights)
+    applicationinsights_connection_string: str = ""
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent / ".env",
         env_file_encoding="utf-8",

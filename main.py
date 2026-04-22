@@ -20,6 +20,8 @@ Endpoints:
   POST /agent                  — AI: conversational payment agent
 """
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -30,6 +32,9 @@ from invoices  import router as invoices_router
 from payments  import router as payments_router
 from customers import router as customers_router
 from agent     import router as agent_router
+
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────
@@ -93,6 +98,22 @@ app = FastAPI(
         }
     ]
 )
+
+# ─────────────────────────────────────────────
+# Observability — Azure Application Insights (OpenTelemetry)
+# ─────────────────────────────────────────────
+
+if settings.applicationinsights_connection_string.strip():
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        configure_azure_monitor(
+            connection_string=settings.applicationinsights_connection_string.strip()
+        )
+        FastAPIInstrumentor.instrument_app(app)
+    except Exception as ex:
+        logger.warning("Application Insights instrumentation was not enabled: %s", ex)
 
 # ─────────────────────────────────────────────
 # CORS — allow Copilot Studio + local dev
