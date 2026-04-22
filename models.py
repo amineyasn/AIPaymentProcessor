@@ -6,8 +6,8 @@ All models include field-level descriptions for OpenAPI / Copilot Studio discove
 from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, List, Optional, Union
+from pydantic import BaseModel, Field, field_validator
 
 
 # ─────────────────────────────────────────────
@@ -199,12 +199,17 @@ class ExtractedPaymentData(BaseModel):
     payment_amounts:   List[float]          = Field(default_factory=list, description="Per-invoice amounts (same order as invoice_numbers)", example=[649.00])
     total_amount:      Optional[float]      = Field(None, description="Total payment amount", example=649.00)
     payment_date:      Optional[str]        = Field(None, description="Payment date as found in document (ISO 8601 preferred)", example="2026-04-02")
-    payment_method:    Optional[str]        = Field(None, description="Payment method detected (ACH, Wire, Check, etc.)", example="ACH")
+    payment_method:    str                  = Field("", description="Payment method detected (ACH, Wire, Check, etc.). Empty string when unknown.", example="ACH")
     payment_reference: Optional[str]        = Field(None, description="Client payment reference or check number", example="607535")
     confidence:        float                = Field(..., description="AI confidence score 0.0–1.0. Below 0.75 triggers human review.", example=0.95)
     needs_review:      bool                 = Field(..., description="True when confidence < 0.75 or required fields are missing")
     raw_text_excerpt:  Optional[str]        = Field(None, description="Short excerpt from the document used for extraction")
     extraction_notes:  Optional[str]        = Field(None, description="Any caveats or ambiguities the AI flagged during extraction")
+
+    @field_validator("payment_method", mode="before")
+    @classmethod
+    def normalize_payment_method(cls, v):
+        return "" if v is None else v
 
 
 class ExtractionResponse(BaseModel):
@@ -233,12 +238,48 @@ class AgentRequest(BaseModel):
     auto_release:    bool             = Field(False, description="If True, release the payment immediately after creation. Default False requires explicit release.")
     history:         List[AgentMessage] = Field(default_factory=list, description="Prior conversation turns for multi-turn context")
 
+    @field_validator("pdf_base64", mode="before")
+    @classmethod
+    def normalize_pdf_base64(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+
+        # Typical case: already a base64 string (or data URI string).
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            if "," in s and s.lower().startswith("data:"):
+                return s.split(",", 1)[1].strip() or None
+            return s
+
+        # Copilot Studio / Power Platform file object variants.
+        if isinstance(v, dict):
+            candidates = [
+                v.get("contentBytes"),
+                v.get("$content"),
+                v.get("content"),
+                v.get("data"),
+            ]
+            for c in candidates:
+                if isinstance(c, str) and c.strip():
+                    s = c.strip()
+                    if "," in s and s.lower().startswith("data:"):
+                        return s.split(",", 1)[1].strip() or None
+                    return s
+            return None
+
+        # Fallback: stringify unknown types (for example, Power Fx coercions).
+        s = str(v).strip()
+        return s or None
+
 
 class AgentResponse(BaseModel):
     conversation_id:   str                        = Field(..., description="Session ID for follow-up turns")
     message:           str                        = Field(..., description="Agent's natural language response")
     extracted_data:    Optional[ExtractedPaymentData] = Field(None, description="Payment data extracted from the PDF (if any)")
     payment_created:   Optional[Payment]          = Field(None, description="Payment record created in Acumatica (if action was taken)")
+    payment_created_text: str                     = Field("", description="Payment reference text. Empty string when no payment was created.")
     payment_released:  bool                       = Field(False, description="True if the payment was also released")
     action_taken:      str                        = Field(..., description="Summary of what the agent did: 'extracted_only' | 'created_payment' | 'created_and_released' | 'needs_review' | 'error'")
     next_steps:        List[str]                  = Field(default_factory=list, description="Suggested follow-up actions for the user")

@@ -8,6 +8,7 @@ POST /agent      — Conversational agent: understands natural language, extract
 
 import base64
 import json
+import logging
 import uuid
 from datetime import datetime, date
 from typing import Optional
@@ -20,10 +21,11 @@ from config import settings
 from models import (
     ExtractedPaymentData, ExtractionResponse,
     CreatePaymentRequest, InvoiceApplication, PaymentMethod,
-    AgentRequest, AgentResponse
+    AgentRequest, AgentResponse, AgentMessage
 )
 
 router = APIRouter(tags=["AI Agent"])
+logger = logging.getLogger(__name__)
 
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
@@ -78,7 +80,51 @@ You have access to these capabilities:
 - Payment creation and release
 
 Respond in plain conversational English. Do not use JSON in your response — the API wraps structured data separately.
+
+Important consistency rule:
+- If extracted payment data is present in context, do NOT claim the PDF is missing or ask the user to attach a PDF.
 """.strip()
+
+
+def _claims_missing_pdf(message: str) -> bool:
+    m = message.lower()
+    phrases = [
+        "don't see any pdf",
+        "do not see any pdf",
+        "no pdf",
+        "missing pdf",
+        "attach the remittance",
+        "attach the pdf",
+        "provide the pdf",
+    ]
+    return any(p in m for p in phrases)
+
+
+def _build_fallback_message(
+    extracted_data: Optional[ExtractedPaymentData],
+    action_taken: str,
+    payment_error: Optional[str],
+    next_steps: list[str],
+) -> str:
+    if not extracted_data:
+        return "I did not receive a remittance PDF to process. Please attach a PDF and try again."
+
+    invoices = ", ".join(extracted_data.invoice_numbers) if extracted_data.invoice_numbers else "none found"
+    total = f"${(extracted_data.total_amount or 0):,.2f}"
+    summary = (
+        f"I parsed the attached PDF and extracted: customer {extracted_data.customer_name or 'unknown'}, "
+        f"invoices {invoices}, total {total}, and confidence {extracted_data.confidence:.0%}."
+    )
+
+    if action_taken == "needs_review":
+        steps = " ".join(next_steps) if next_steps else "Please review extracted fields before creating the payment."
+        return f"{summary} The remittance requires review before posting. {steps}"
+
+    if action_taken == "error":
+        err = payment_error or "An unexpected error occurred while creating the payment."
+        return f"{summary} I could not complete payment creation: {err}"
+
+    return summary
 
 
 def _parse_extraction(raw: str) -> dict:
@@ -132,7 +178,10 @@ async def extract_pdf(
     email_subject: Optional[str] = Form(None, description="Email subject line (helps with date and customer detection)"),
     email_body: Optional[str] = Form(None, description="Email body text (used as fallback if PDF is sparse)")
 ):
+    logger.info("/extract called filename=%s has_email_subject=%s has_email_body=%s", file.filename, bool(email_subject), bool(email_body))
+
     if not file.filename.lower().endswith(".pdf"):
+        logger.warning("/extract rejected non-pdf filename=%s", file.filename)
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
     pdf_bytes = await file.read()
@@ -171,9 +220,17 @@ async def extract_pdf(
     try:
         data = _parse_extraction(raw)
     except (json.JSONDecodeError, KeyError) as e:
+        logger.exception("/extract failed to parse AI response")
         raise HTTPException(status_code=500, detail=f"AI returned unparseable response: {str(e)}")
 
     extracted = ExtractedPaymentData(**data)
+    logger.info(
+        "/extract parsed confidence=%.2f needs_review=%s invoices=%d customer=%s",
+        extracted.confidence,
+        extracted.needs_review,
+        len(extracted.invoice_numbers),
+        extracted.customer_name,
+    )
 
     # Try to match customer
     customer_id = None
@@ -205,6 +262,7 @@ async def extract_pdf(
                 invoices_to_apply=inv_apps,
             )
         except Exception:
+            logger.exception("/extract failed to build suggested payload")
             pass  # Don't fail extraction if suggestion build fails
 
     return ExtractionResponse(
@@ -244,6 +302,20 @@ async def agent(body: AgentRequest):
     action_taken = "needs_review"
     next_steps = []
 
+    logger.info(
+        "/agent called conversation_id=%s has_pdf=%s auto_release=%s history_items=%d",
+        conversation_id,
+        bool(body.pdf_base64),
+        body.auto_release,
+        len(body.history),
+    )
+    if body.pdf_base64:
+        logger.info(
+            "/agent pdf payload length=%d prefix=%s",
+            len(body.pdf_base64),
+            body.pdf_base64[:24],
+        )
+
     # Build the messages list for Claude
     messages = [{"role": m.role, "content": m.content} for m in body.history]
 
@@ -275,6 +347,13 @@ async def agent(body: AgentRequest):
             raw = extraction_response.content[0].text
             data = _parse_extraction(raw)
             extracted_data = ExtractedPaymentData(**data)
+            logger.info(
+                "/agent extraction success confidence=%.2f needs_review=%s invoices=%d customer=%s",
+                extracted_data.confidence,
+                extracted_data.needs_review,
+                len(extracted_data.invoice_numbers),
+                extracted_data.customer_name,
+            )
 
             # Enrich with customer match
             if extracted_data.customer_name:
@@ -296,6 +375,7 @@ async def agent(body: AgentRequest):
             )
             user_content.append({"type": "text", "text": extraction_summary + "\n\nUser instruction: " + body.message})
         except Exception as e:
+            logger.exception("/agent extraction failed")
             user_content.append({"type": "text", "text": f"PDF extraction failed: {str(e)}\n\nUser instruction: {body.message}"})
     else:
         user_content.append({"type": "text", "text": body.message})
@@ -334,6 +414,7 @@ async def agent(body: AgentRequest):
                 invoices_to_apply=payment_req.invoices_to_apply,
             )
             action_taken = "created_payment"
+            logger.info("/agent payment created payment_id=%s reference=%s", payment.payment_id, payment.reference_nbr)
 
             if body.auto_release:
                 released = db.release_payment(payment.payment_id)
@@ -341,9 +422,11 @@ async def agent(body: AgentRequest):
                     payment = released
                     payment_released = True
                     action_taken = "created_and_released"
+                    logger.info("/agent payment released payment_id=%s reference=%s", payment.payment_id, payment.reference_nbr)
                     next_steps.append("Payment is fully released and posted to the ledger.")
                     next_steps.append(f"Reference number: {payment.reference_nbr}")
                 else:
+                    logger.warning("/agent release requested but payment release failed payment_id=%s", payment.payment_id)
                     next_steps.append("Payment created but release failed — release manually in Acumatica.")
             else:
                 next_steps.append(f"Call POST /payments/{payment.payment_id}/release to release the payment.")
@@ -352,13 +435,16 @@ async def agent(body: AgentRequest):
         except HTTPException as e:
             payment_error = e.detail
             action_taken = "error"
+            logger.exception("/agent payment creation HTTP error")
             next_steps.append(f"Error: {payment_error}")
         except Exception as e:
             payment_error = str(e)
             action_taken = "error"
+            logger.exception("/agent payment creation unexpected error")
 
     elif extracted_data and extracted_data.needs_review:
         action_taken = "needs_review"
+        logger.info("/agent routed to manual review")
         if not extracted_data.customer_id:
             next_steps.append("Customer could not be matched — provide the Acumatica Customer ID.")
         if not extracted_data.invoice_numbers:
@@ -369,6 +455,7 @@ async def agent(body: AgentRequest):
 
     elif body.pdf_base64 is None and extracted_data is None:
         action_taken = "extracted_only"
+        logger.info("/agent no pdf provided")
         next_steps.append("Attach a PDF remittance to process a payment.")
 
     # Build agent message context string
@@ -393,12 +480,108 @@ Next steps: {', '.join(next_steps) if next_steps else 'None'}
     )
     agent_message = agent_response.content[0].text
 
+    # Guardrail: if extraction succeeded, never return a contradictory "missing PDF" message.
+    if extracted_data and _claims_missing_pdf(agent_message):
+        logger.warning("/agent model response contradicted extraction; applying fallback message")
+        agent_message = _build_fallback_message(
+            extracted_data=extracted_data,
+            action_taken=action_taken,
+            payment_error=payment_error,
+            next_steps=next_steps,
+        )
+
+    logger.info("/agent completed action_taken=%s payment_released=%s", action_taken, payment_released)
+
     return AgentResponse(
         conversation_id=conversation_id,
         message=agent_message,
         extracted_data=extracted_data,
         payment_created=payment,
+        payment_created_text=payment.reference_nbr if payment else "",
         payment_released=payment_released,
         action_taken=action_taken,
         next_steps=next_steps
     )
+
+
+@router.post(
+    "/agent/upload",
+    response_model=AgentResponse,
+    summary="Conversational AI payment agent (multipart upload)",
+    description=(
+        "Alternative to POST /agent for clients that cannot provide pdf_base64 directly. "
+        "Accepts a multipart PDF file and converts it to base64 server-side before processing."
+    ),
+    tags=["AI Agent"],
+    include_in_schema=False,
+)
+async def agent_upload(
+    message: Optional[str] = Form(None, description="Natural language instruction from the user"),
+    file: Optional[UploadFile] = File(None, description="PDF remittance document"),
+    pdf_base64: Optional[str] = Form(None, description="Optional base64 PDF payload for clients that cannot send multipart file parts"),
+    conversation_id: Optional[str] = Form(None, description="Session ID to maintain multi-turn context"),
+    auto_release: Optional[str] = Form(None, description="If True, release payment immediately after creation"),
+    history: Optional[str] = Form(None, description="Optional JSON array of prior messages: [{\"role\":\"user\",\"content\":\"...\"}]"),
+):
+    logger.info(
+        "/agent/upload called filename=%s has_conversation_id=%s auto_release=%s",
+        file.filename if file else None,
+        bool(conversation_id),
+        auto_release,
+    )
+
+    if not (message or "").strip():
+        logger.warning("/agent/upload missing message")
+        raise HTTPException(status_code=400, detail="Form field 'message' is required.")
+
+    auto_release_value = str(auto_release or "").strip().lower() in {"1", "true", "yes", "y"}
+
+    if file is None and not pdf_base64:
+        logger.warning("/agent/upload missing both file and pdf_base64")
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either multipart field 'file' or form field 'pdf_base64'.",
+        )
+
+    normalized_pdf_base64: Optional[str] = None
+
+    if file is not None:
+        if file.filename and not file.filename.lower().endswith(".pdf"):
+            logger.warning("/agent/upload rejected non-pdf filename=%s", file.filename)
+            raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+        pdf_bytes = await file.read()
+        if not pdf_bytes:
+            logger.warning("/agent/upload received empty file")
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        normalized_pdf_base64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    else:
+        s = (pdf_base64 or "").strip()
+        if "," in s and s.lower().startswith("data:"):
+            s = s.split(",", 1)[1].strip()
+        if not s:
+            logger.warning("/agent/upload received blank pdf_base64")
+            raise HTTPException(status_code=400, detail="Form field 'pdf_base64' was provided but empty.")
+        normalized_pdf_base64 = s
+
+    parsed_history = []
+    if history:
+        try:
+            raw_history = json.loads(history)
+            if isinstance(raw_history, dict):
+                raw_history = [raw_history]
+            if isinstance(raw_history, list):
+                parsed_history = [AgentMessage(**m) for m in raw_history if isinstance(m, dict)]
+            else:
+                logger.warning("/agent/upload history JSON was not a list or object; ignoring history")
+        except Exception:
+            logger.warning("/agent/upload received invalid history JSON; ignoring history")
+
+    body = AgentRequest(
+        message=message.strip(),
+        pdf_base64=normalized_pdf_base64,
+        conversation_id=conversation_id,
+        auto_release=auto_release_value,
+        history=parsed_history,
+    )
+    return await agent(body)

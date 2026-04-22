@@ -36,6 +36,12 @@ from agent     import router as agent_router
 
 logger = logging.getLogger(__name__)
 
+# Show application logs from route modules (e.g., agent.py) in the same terminal as Uvicorn.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 
 # ─────────────────────────────────────────────
 # App instance
