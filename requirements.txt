@@ -9,4 +9,4 @@ debugpy
 httpx==0.28.1
 pytest==8.3.4
 azure-monitor-opentelemetry==1.6.5
-opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-instrumentation-fastapi==0.49b0
