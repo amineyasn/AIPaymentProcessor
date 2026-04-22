@@ -53,6 +53,9 @@ def _convert_schema(schema: Any) -> Any:
             out[k] = [_convert_schema(i) if isinstance(i, dict) else i for i in v]
         else:
             out[k] = v
+    # Swagger 2.0: $ref must be the only key — strip all siblings
+    if "$ref" in out and len(out) > 1:
+        out = {"$ref": out["$ref"]}
     return out
 
 
