@@ -168,18 +168,18 @@ INVOICES: Dict[str, Invoice] = {
         balance_due=3200.00,
         description="Site installation — Project 44"
     ),
-    # Already-paid invoice for troubleshooting demo
+    # Open invoice for troubleshooting demo
     "600100": Invoice(
         reference_nbr="600100",
         customer_id="DPR001",
         customer_name="DPR Construction",
         document_type=DocumentType.INVOICE,
-        status=InvoiceStatus.CLOSED,
+        status=InvoiceStatus.OPEN,
         doc_date=date(2026, 1, 5),
         due_date=date(2026, 2, 5),
         amount_due=1875.00,
-        balance_due=0.00,
-        description="Q4 2025 camera service — paid"
+        balance_due=1875.00,
+        description="Q4 2025 camera service"
     ),
 }
 
